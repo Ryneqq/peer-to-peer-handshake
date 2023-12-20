@@ -4,10 +4,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bitcoin::consensus::{encode, Decodable};
 use bitcoin::p2p::{self, address, message, message_network};
-use peer_to_peer_handshake::DnsResolver;
+use clap::Parser;
+use peer_to_peer_handshake::{Args, DnsResolver};
 use rand::{thread_rng, Rng};
 
 fn main() {
+    let args = Args::parse();
     let dns_resolver = DnsResolver::default();
     let mut possible_addresses = dns_resolver.resolve_bitcoin_address();
     let address = possible_addresses
