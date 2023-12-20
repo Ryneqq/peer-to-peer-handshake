@@ -1,0 +1,11 @@
+[package]
+name = "peer-to-peer-handshake"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitcoin = { version = "0.31.0", features = ["std", "rand"] }
+rand = { version = "0.6", features = ["std"] }
+trust-dns-resolver = "0.20.0"
