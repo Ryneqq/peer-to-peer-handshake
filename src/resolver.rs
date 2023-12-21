@@ -1,7 +1,9 @@
 use std::net::IpAddr;
 
+use futures::stream::LocalBoxStream;
+use futures::{future, StreamExt};
 use trust_dns_resolver::config::{ResolverConfig, ResolverOpts};
-use trust_dns_resolver::Resolver;
+use trust_dns_resolver::{AsyncResolver, TokioAsyncResolver};
 
 const DEFAULT_SEED_NODES: &[&str] = &[
     "seed.bitcoin.sipa.be",
@@ -14,6 +16,7 @@ const DEFAULT_SEED_NODES: &[&str] = &[
 #[derive(Debug)]
 pub struct DnsResolver<'a> {
     seed_nodes: &'a [&'a str],
+    resolver: TokioAsyncResolver,
 }
 
 impl<'a> Default for DnsResolver<'a> {
@@ -29,48 +32,20 @@ impl<'a> DnsResolver<'a> {
         } else {
             seed_nodes
         };
-
-        Self { seed_nodes }
-    }
-
-    pub fn resolve_bitcoin_address(&self) -> impl Iterator<Item = IpAddr> + 'a {
-        // Create a new resolver with default configuration
-        let resolver = Resolver::new(ResolverConfig::default(), ResolverOpts::default())
+        let resolver = AsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())
             .expect("Failed to create resolver");
 
-        self.seed_nodes.iter().flat_map(move |seed_node| {
-            // Resolve the IP addresses for the seed node
-            let response = resolver
-                .lookup_ip(*seed_node)
-                .expect("Failed to resolve IP address");
+        Self {
+            seed_nodes,
+            resolver,
+        }
+    }
 
-            // Print the resolved IP addresses
-            response.into_iter().map(move |ip_address| {
-                println!("Resolved IP address for {}: {}", seed_node, ip_address);
-                ip_address
-            })
-        })
+    pub async fn resolve_bitcoin_addresses(&'a self) -> LocalBoxStream<'a, IpAddr> {
+        futures::stream::iter(self.seed_nodes.iter())
+            .then(move |seed_node| self.resolver.lookup_ip(*seed_node))
+            .filter(|response| future::ready(response.is_ok()))
+            .flat_map(|response| futures::stream::iter(response.unwrap().into_iter()))
+            .boxed_local()
     }
 }
-
-// pub fn resolve_bitcoin_address<'a>(seed_nodes: &'a [&'a str]) -> impl Iterator<Item = IpAddr> {
-//     // Create a new resolver with default configuration
-//     let resolver = Resolver::new(ResolverConfig::default(), ResolverOpts::default())
-//         .expect("Failed to create resolver");
-
-//     // Perform a DNS lookup for Bitcoin seed nodes
-//     let seed_nodes = seed_nodes.is_empty().then(|| DEFAULT_SEED_NODES).unwrap(); // won't panic because of the previous `then`
-
-//     seed_nodes.into_iter().flat_map(move |seed_node| {
-//         // Resolve the IP addresses for the seed node
-//         let response = resolver
-//             .lookup_ip(seed_node)
-//             .expect("Failed to resolve IP address");
-
-//         // Print the resolved IP addresses
-//         response.into_iter().map(move |ip_address| {
-//             println!("Resolved IP address for {}: {}", seed_node, ip_address);
-//             ip_address
-//         })
-//     })
-// }

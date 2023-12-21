@@ -4,9 +4,9 @@ use clap::Parser;
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     #[arg(long)]
-    network: String,
+    network: Option<String>,
     #[arg(long)]
-    dns_address: String,
+    dns_address: Option<String>,
 }
 
 pub enum Network {
