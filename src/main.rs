@@ -1,13 +1,16 @@
+use std::io;
 use std::io::{BufReader, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
 
 use bitcoin::consensus::{encode, Decodable};
-use bitcoin::p2p::message;
+use bitcoin::p2p::message::{self, RawNetworkMessage, MAX_MSG_SIZE};
 use clap::Parser;
-use futures::StreamExt;
+use futures::{future, stream, StreamExt, TryStreamExt};
 use peer_to_peer_handshake::{build_version_message, Args, DnsResolver};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream as AsyncTcpStream;
+use tokio::sync::Mutex;
 use tokio::task;
 
 #[tokio::main]
@@ -23,21 +26,19 @@ async fn main() {
     let version_message = build_version_message(address);
     let first_message =
         message::RawNetworkMessage::new(bitcoin::Network::Bitcoin.magic(), version_message);
-    let mut stream = AsyncTcpStream::connect(address).await.unwrap();
-    // Send the message
-    let _ = stream
-        .write_all(encode::serialize(&first_message).as_slice())
-        .await;
+    let mut stream = TcpStream::connect(address).unwrap();
 
+    // Send the message
+    let _ = stream.write_all(encode::serialize(&first_message).as_slice());
     println!("Sent version message");
 
     // Setup StreamReader
     let read_stream = stream.try_clone().unwrap();
-    let mut stream_reader = AsyncBufReader::new(read_stream);
+    let mut stream_reader = BufReader::new(read_stream);
 
     loop {
         // Loop an retrieve new messages
-        let reply = message::RawNetworkMessage::consensus_decode(&mut stream).unwrap();
+        let reply = message::RawNetworkMessage::consensus_decode(&mut stream_reader).unwrap();
         match reply.payload() {
             message::NetworkMessage::Version(_) => {
                 println!("Received version message: {:?}", reply.payload());
