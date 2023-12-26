@@ -1,73 +1,84 @@
 use std::io;
 use std::io::{BufReader, Write};
-use std::net::{Shutdown, SocketAddr, TcpStream};
+use std::net::{IpAddr, Shutdown, SocketAddr, TcpStream};
 
 use bitcoin::consensus::{encode, Decodable};
 use bitcoin::p2p::message::{self, RawNetworkMessage, MAX_MSG_SIZE};
-use clap::Parser;
 use futures::{future, stream, StreamExt, TryStreamExt};
-use peer_to_peer_handshake::{build_version_message, Args, DnsResolver};
+use peer_to_peer_handshake::{
+    build_version_message, Args, Config, DnsResolver, Error, Result, BITCOIN_PORT,
+};
 use std::sync::Arc;
+use structopt::StructOpt;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream as AsyncTcpStream;
 use tokio::sync::Mutex;
 use tokio::task;
+use tracing::{error, info};
+use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
 async fn main() {
-    let args = Args::parse();
+    let args = Args::from_args();
+    let config = Config::from(args);
+    let subscriber = FmtSubscriber::new();
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
     let dns_resolver = DnsResolver::default();
-    let mut possible_addresses = dns_resolver.resolve_bitcoin_addresses().await;
-    let address = possible_addresses
-        .next()
+
+    dns_resolver
+        .resolve_bitcoin_addresses()
         .await
-        .expect("Failed to resolve IP address");
-    let address = SocketAddr::new(address, 8333); // TODO incorporate it into the DnsResolver with an enum regarding type of network we are trying to reach
+        .for_each_concurrent(config.concurent as usize, |address| async move {
+            let result = handshake(address).await;
+
+            if result.is_err() {
+                error!("Failed to handshake with {:?}", address);
+            }
+        })
+        .await;
+}
+
+async fn handshake(address: IpAddr) -> Result<()> {
+    let address = SocketAddr::new(address, BITCOIN_PORT);
     let version_message = build_version_message(address);
+    let mut stream = TcpStream::connect(address)?;
+    let read_stream = stream.try_clone()?;
+    let mut stream_reader = BufReader::new(read_stream);
+
     let first_message =
         message::RawNetworkMessage::new(bitcoin::Network::Bitcoin.magic(), version_message);
-    let stream = Arc::new(Mutex::new(TcpStream::connect(address).unwrap()));
 
     // Send the message
-    let _ = stream
-        .lock()
-        .await
-        .write_all(encode::serialize(&first_message).as_slice());
-    println!("Sent version message");
-
-    // Setup StreamReader
-    let read_stream = stream.lock().await.try_clone().unwrap();
-    let stream_reader = Arc::new(Mutex::new(BufReader::new(read_stream)));
+    stream.write_all(encode::serialize(&first_message).as_slice())?;
+    info!("Sent version message");
 
     loop {
         // Loop an retrieve new messages
-        let mut stream_reader_local = stream_reader.lock().await;
-        let reply =
-            message::RawNetworkMessage::consensus_decode(&mut *stream_reader_local).unwrap();
+        let reply = message::RawNetworkMessage::consensus_decode(&mut stream_reader)?;
         match reply.payload() {
             message::NetworkMessage::Version(_) => {
-                println!("Received version message: {:?}", reply.payload());
+                info!("Received version message: {:?}", reply.payload());
 
                 let second_message = message::RawNetworkMessage::new(
                     bitcoin::Network::Bitcoin.magic(),
                     message::NetworkMessage::Verack,
                 );
 
-                let _ = stream
-                    .lock()
-                    .await
-                    .write_all(encode::serialize(&second_message).as_slice());
-                println!("Sent verack message");
+                stream.write_all(encode::serialize(&second_message).as_slice())?;
+                info!("Sent verack message");
             }
             message::NetworkMessage::Verack => {
-                println!("Received verack message: {:?}", reply.payload());
+                info!("Received verack message: {:?}", reply.payload());
                 break;
             }
             _ => {
-                println!("Received unknown message: {:?}", reply.payload());
+                info!("Received unknown message: {:?}", reply.payload());
                 break;
             }
         }
     }
-    let _ = stream.lock().await.shutdown(Shutdown::Both);
+
+    stream.shutdown(Shutdown::Both)?;
+
+    Ok(())
 }
