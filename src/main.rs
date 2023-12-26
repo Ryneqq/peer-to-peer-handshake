@@ -26,19 +26,24 @@ async fn main() {
     let version_message = build_version_message(address);
     let first_message =
         message::RawNetworkMessage::new(bitcoin::Network::Bitcoin.magic(), version_message);
-    let mut stream = TcpStream::connect(address).unwrap();
+    let stream = Arc::new(Mutex::new(TcpStream::connect(address).unwrap()));
 
     // Send the message
-    let _ = stream.write_all(encode::serialize(&first_message).as_slice());
+    let _ = stream
+        .lock()
+        .await
+        .write_all(encode::serialize(&first_message).as_slice());
     println!("Sent version message");
 
     // Setup StreamReader
-    let read_stream = stream.try_clone().unwrap();
-    let mut stream_reader = BufReader::new(read_stream);
+    let read_stream = stream.lock().await.try_clone().unwrap();
+    let stream_reader = Arc::new(Mutex::new(BufReader::new(read_stream)));
 
     loop {
         // Loop an retrieve new messages
-        let reply = message::RawNetworkMessage::consensus_decode(&mut stream_reader).unwrap();
+        let mut stream_reader_local = stream_reader.lock().await;
+        let reply =
+            message::RawNetworkMessage::consensus_decode(&mut *stream_reader_local).unwrap();
         match reply.payload() {
             message::NetworkMessage::Version(_) => {
                 println!("Received version message: {:?}", reply.payload());
@@ -48,7 +53,10 @@ async fn main() {
                     message::NetworkMessage::Verack,
                 );
 
-                let _ = stream.write_all(encode::serialize(&second_message).as_slice());
+                let _ = stream
+                    .lock()
+                    .await
+                    .write_all(encode::serialize(&second_message).as_slice());
                 println!("Sent verack message");
             }
             message::NetworkMessage::Verack => {
@@ -61,5 +69,5 @@ async fn main() {
             }
         }
     }
-    let _ = stream.shutdown(Shutdown::Both);
+    let _ = stream.lock().await.shutdown(Shutdown::Both);
 }
