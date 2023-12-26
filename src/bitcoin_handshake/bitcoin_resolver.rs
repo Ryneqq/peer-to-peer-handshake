@@ -14,18 +14,18 @@ const DEFAULT_SEED_NODES: &[&str] = &[
 ];
 
 #[derive(Debug)]
-pub struct DnsResolver<'a> {
+pub struct BitcoinDnsResolver<'a> {
     seed_nodes: &'a [&'a str],
     resolver: TokioAsyncResolver,
 }
 
-impl<'a> Default for DnsResolver<'a> {
+impl<'a> Default for BitcoinDnsResolver<'a> {
     fn default() -> Self {
         Self::new(DEFAULT_SEED_NODES)
     }
 }
 
-impl<'a> DnsResolver<'a> {
+impl<'a> BitcoinDnsResolver<'a> {
     pub fn new(seed_nodes: &'a [&'a str]) -> Self {
         let seed_nodes = if seed_nodes.is_empty() {
             DEFAULT_SEED_NODES
