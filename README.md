@@ -1,6 +1,6 @@
 ## Disclaimer
 
-This project was created as an exercise for interview. It does not have any real life usage as it only showcase high level production code example with usage libraries such as this-error, tracing, struct-opt etc. Project was designed to have in mind:
+This project was created as an exercise for interview. It does not have any real life usage as it only showcase high level production code example with usage libraries such as thiserror, tracing, structopt etc. Project was designed to have in mind:
 * to be idiomatic,
 * to be self explanatory as in Clean Code paradigm,
 * to be extentandable,
